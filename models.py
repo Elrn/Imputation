@@ -73,6 +73,7 @@ def build(input_shape, model):
 def discriminator(units=64, drop_rate=0.2):
     def main(x):
         # x = Embedding(input_dim=1000, output_dim=64)(x)
+        x = Masking(mask_value=np.nan)(x)
         x = tf.keras.layers.RNN(
             tf.keras.layers.GRUICell(units),
             return_sequences=True,
@@ -85,6 +86,7 @@ def discriminator(units=64, drop_rate=0.2):
 
 def generator(units=64, drop_rate=0.2):
     def main(x):
+        x = Masking(mask_value=np.nan)(x)
         z = z_generator()(x)
         x = tf.keras.layers.RNN(
             tf.keras.layers.GRUICell(units, return_sequences=True),
