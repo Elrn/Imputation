@@ -88,8 +88,59 @@ num_columns = 36 # except header cols
 get_input_shape = lambda :[FLAGS.input_dims, num_columns]
 
 def parse_fn(x):
-    x = tf.transpose(x, [1,0])
-    return x
+    num_seqs = end_index - start_index - (sequence_length * sampling_rate) + 1
+    if targets is not None:
+        num_seqs = min(num_seqs, len(targets))
+    if num_seqs < 2147483647:
+        index_dtype = 'int32'
+    else:
+        index_dtype = 'int64'
+
+    # Generate start positions
+    start_positions = np.arange(0, num_seqs, sequence_stride, dtype=index_dtype)
+    if shuffle:
+        if seed is None:
+            seed = np.random.randint(1e6)
+        rng = np.random.RandomState(seed)
+        rng.shuffle(start_positions)
+
+    sequence_length = tf.cast(sequence_length, dtype=index_dtype)
+    sampling_rate = tf.cast(sampling_rate, dtype=index_dtype)
+
+    positions_ds = tf.data.Dataset.from_tensors(start_positions).repeat()
+
+    # For each initial window position, generates indices of the window elements
+    indices = tf.data.Dataset.zip(
+        (tf.data.Dataset.range(len(start_positions)), positions_ds)).map(
+        lambda i, positions: tf.range(  # pylint: disable=g-long-lambda
+            positions[i],
+            positions[i] + sequence_length * sampling_rate,
+            sampling_rate),
+        num_parallel_calls=tf.data.AUTOTUNE)
+
+    dataset = sequences_from_indices(data, indices, start_index, end_index)
+    if targets is not None:
+        indices = tf.data.Dataset.zip(
+            (tf.data.Dataset.range(len(start_positions)), positions_ds)).map(
+            lambda i, positions: positions[i],
+            num_parallel_calls=tf.data.AUTOTUNE)
+        target_ds = sequences_from_indices(
+            targets, indices, start_index, end_index)
+        dataset = tf.data.Dataset.zip((dataset, target_ds))
+    dataset = dataset.prefetch(tf.data.AUTOTUNE)
+    if batch_size is not None:
+        if shuffle:
+            # Shuffle locally at each iteration
+            dataset = dataset.shuffle(buffer_size=batch_size * 8, seed=seed)
+        dataset = dataset.batch(batch_size)
+    else:
+        if shuffle:
+            dataset = dataset.shuffle(buffer_size=1024, seed=seed)
+    return dataset
+
+def parse_fn_from_txt():
+
+    return
 
 def validation_split_fn(dataset, validation_split):
     len_dataset = tf.data.experimental.cardinality(dataset).numpy()
@@ -193,58 +244,59 @@ def refinement(df):
     # --------------------------------------------------------------------------------------------------
     return df
 
+def preprocessing(file):
+    txt_all = []
+    with open(file, 'r') as fp:
+        txt = fp.readlines()
+    txt = [t.rstrip('\n').split(',') for t in txt]
+    txt_all.extend(txt[1:])  # except column name
+    df = pd.DataFrame(txt_all, columns=['time', 'parameter', 'value'])
+    ### time 변환
+    df['time'] = df['time'].map(lambda x: float(x.split(':')[0]) * 60 + float(x.split(':')[1]))
+    # type 변환
+    df['value'] = pd.to_numeric(df['value'], errors='raise')
+    #
+    df.reset_index(drop=True, inplace=True)  # header를 제외한 index를 처음부터 다시 설정
+    ### handling abnormal data
+    df = refinement(df)
+    ### alignment along time
+    df = df.groupby(['time', 'parameter']).last()
+    df.reset_index(inplace=True)
+    df = df.pivot(index='time', columns='parameter', values='value')
+    ### 없는 features 를 np.nan으로 추가
+    cur_features = set(df.columns)
+    add_features = base_features - cur_features
+    df[list(add_features)] = np.nan
+    df = df.reindex(sorted(df.columns), axis=1)
+
+    ### Header
+    # header = df.loc[df['time'] == 0, :].copy()
+    header_features = ['RecordID', 'Age', 'Gender', 'Height', 'ICUType', 'Weight']
+    ### Header 제거
+    df = df.drop(columns=header_features)
+    # header = header.loc[df['parameter'].isin(header_features)]
+    # df = df.loc[~df.index.isin(header.index), :]
+
+    ### Normalization data
+    df = (df - df.min()) / (df.max() - df.min())
+    ### time matrix
+    nan_map = pd.isnull(df).to_numpy()
+    tdf = pd.Index(df.index, name='time')#.to_frame(index=False)
+    time = dutils.time_lag_matrix(nan_map, tdf)
+    df = df.to_numpy()
+
+    return df, time
+
 def main(argv):
     pattern = utils.join_dir([FLAGS.data_dir, '*.txt'])
     paths = glob(pattern)
-    save_dir = 'C:\\dataset\\PhysioNet\\2012\\arr'
-
     for file in paths:
-        print(file)
-        txt_all = []
-        with open(file, 'r') as fp:
-            txt = fp.readlines()
-        txt = [t.rstrip('\n').split(',') for t in txt]
-        txt_all.extend(txt[1:])  # except column name
-        df = pd.DataFrame(txt_all, columns=['time', 'parameter', 'value'])
-        ### time 변환
-        df['time'] = df['time'].map(lambda x: float(x.split(':')[0]) * 60 + float(x.split(':')[1]))
-        # type 변환
-        df['value'] = pd.to_numeric(df['value'], errors='raise')
-        #
-        df.reset_index(drop=True, inplace=True)  # header를 제외한 index를 처음부터 다시 설정
-        ### handling abnormal data
-        df = refinement(df)
-        ### alignment along time
-        df = df.groupby(['time', 'parameter']).last()
-        df.reset_index(inplace=True)
-        df = df.pivot(index='time', columns='parameter', values='value')
-        ### 없는 features 를 np.nan으로 추가
-        cur_features = set(df.columns)
-        add_features = base_features - cur_features
-        df[list(add_features)] = np.nan
-        df = df.reindex(sorted(df.columns), axis=1)
-
-        ### Header
-        # header = df.loc[df['time'] == 0, :].copy()
-        header_features = ['RecordID', 'Age', 'Gender', 'Height', 'ICUType', 'Weight']
-        ### Header 제거
-        df = df.drop(columns=header_features)
-        # header = header.loc[df['parameter'].isin(header_features)]
-        # df = df.loc[~df.index.isin(header.index), :]
-
-        ### Normalization data
-        df = (df - df.min()) / (df.max() - df.min())
-        ### time matrix
-        nan_map = pd.isnull(df).to_numpy()
-        tdf = pd.Index(df.index, name='time')#.to_frame(index=False)
-        time = dutils.time_lag_matrix(nan_map, tdf)
-
+        df_arr, time_arr = preprocessing(file)
         filename = os.path.splitext(os.path.basename(file))[0]
-        # filename = os.path.dirname(file)
-        # save_path = utils.join_dir([save_dir, filename])
-        # np.savez_compressed(save_path, data=df.to_numpy(), time=time)
-        np.save(utils.join_dir([save_dir, filename + '_data']), df.to_numpy())
-        np.save(utils.join_dir([save_dir, filename + '_time']), time)
+        save_path = utils.join_dir([FLAGS.arr_dir, filename])
+        # np.savez_compressed(save_path, data=df_arr, time=time_arr)
+        np.save(utils.join_dir([save_path, filename + '_data']), df_arr)
+        np.save(utils.join_dir([save_path, filename + '_time']), time_arr)
 
 
 if __name__ == '__main__':
