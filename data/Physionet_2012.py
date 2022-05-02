@@ -88,8 +88,8 @@ num_columns = 36 # except header cols
 get_input_shape = lambda :[FLAGS.input_dims, num_columns]
 
 def parse_fn(x):
-    print(x)
-    return np.load(x)
+    x = tf.transpose(x, [1,0])
+    return x
 
 def validation_split_fn(dataset, validation_split):
     len_dataset = tf.data.experimental.cardinality(dataset).numpy()
@@ -99,15 +99,20 @@ def validation_split_fn(dataset, validation_split):
 
 def build(file_pattern, bsz, validation_split=0.1):
     assert 0 <= validation_split <= 0.5
-    dataset = load(file_pattern, bsz)
+    paths = glob(file_pattern)
+    arrs = []
+    for path in paths:
+        arrs.extend(np.load(path))
+
+    dataset = load(arrs, bsz)
     if validation_split is not None and validation_split is not 0:
         return validation_split_fn(dataset, validation_split)
     else:
         return dataset, None
 
-def load(file_pattern, bsz, drop=True):
-    return tf.data.Dataset.list_files(
-        file_pattern,
+def load(arrs, bsz, drop=True):
+    return tf.data.Dataset.from_tensor_slices(
+        arrs,
     ).prefetch(
         tf.data.experimental.AUTOTUNE
     ).map(
