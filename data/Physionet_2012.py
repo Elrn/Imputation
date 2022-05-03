@@ -88,59 +88,29 @@ num_columns = 36 # except header cols
 get_input_shape = lambda :[FLAGS.input_dims, num_columns]
 
 def parse_fn(x):
-    num_seqs = end_index - start_index - (sequence_length * sampling_rate) + 1
-    if targets is not None:
-        num_seqs = min(num_seqs, len(targets))
-    if num_seqs < 2147483647:
-        index_dtype = 'int32'
-    else:
-        index_dtype = 'int64'
+    start_index = 0
+    end_index = x.shape[0]
+    num_seqs = end_index - start_index - (FLAGS.input_dims) + 1
 
-    # Generate start positions
-    start_positions = np.arange(0, num_seqs, sequence_stride, dtype=index_dtype)
-    if shuffle:
-        if seed is None:
-            seed = np.random.randint(1e6)
-        rng = np.random.RandomState(seed)
-        rng.shuffle(start_positions)
+    index_dtype = 'int32' if num_seqs < 2147483647 else 'int64'
 
-    sequence_length = tf.cast(sequence_length, dtype=index_dtype)
-    sampling_rate = tf.cast(sampling_rate, dtype=index_dtype)
+    start_positions = np.arange(0, num_seqs, dtype=index_dtype)
+    sequence_length = tf.cast(FLAGS.input_dims, dtype=index_dtype)
 
     positions_ds = tf.data.Dataset.from_tensors(start_positions).repeat()
 
-    # For each initial window position, generates indices of the window elements
-    indices = tf.data.Dataset.zip(
-        (tf.data.Dataset.range(len(start_positions)), positions_ds)).map(
-        lambda i, positions: tf.range(  # pylint: disable=g-long-lambda
-            positions[i],
-            positions[i] + sequence_length * sampling_rate,
-            sampling_rate),
-        num_parallel_calls=tf.data.AUTOTUNE)
-
-    dataset = sequences_from_indices(data, indices, start_index, end_index)
-    if targets is not None:
-        indices = tf.data.Dataset.zip(
-            (tf.data.Dataset.range(len(start_positions)), positions_ds)).map(
-            lambda i, positions: positions[i],
-            num_parallel_calls=tf.data.AUTOTUNE)
-        target_ds = sequences_from_indices(
-            targets, indices, start_index, end_index)
-        dataset = tf.data.Dataset.zip((dataset, target_ds))
-    dataset = dataset.prefetch(tf.data.AUTOTUNE)
-    if batch_size is not None:
-        if shuffle:
-            # Shuffle locally at each iteration
-            dataset = dataset.shuffle(buffer_size=batch_size * 8, seed=seed)
-        dataset = dataset.batch(batch_size)
-    else:
-        if shuffle:
-            dataset = dataset.shuffle(buffer_size=1024, seed=seed)
+    zip_ds = tf.data.Dataset.zip((tf.data.Dataset.range(len(start_positions)), positions_ds))
+    indices = zip_ds.map(
+        lambda i, positions: tf.range(positions[i], positions[i] + sequence_length),
+        num_parallel_calls=tf.data.AUTOTUNE
+    )
+    zip_ds = tf.data.Dataset.zip((tf.data.Dataset.from_tensors(x).repeat(), indices))
+    dataset = zip_ds.map(
+        lambda steps, inds: tf.gather(steps, inds),
+        num_parallel_calls=tf.data.AUTOTUNE
+    ).prefetch(tf.data.AUTOTUNE)
     return dataset
 
-def parse_fn_from_txt():
-
-    return
 
 def validation_split_fn(dataset, validation_split):
     len_dataset = tf.data.experimental.cardinality(dataset).numpy()
@@ -150,9 +120,8 @@ def validation_split_fn(dataset, validation_split):
 
 def build(file_pattern, bsz, validation_split=0.1):
     assert 0 <= validation_split <= 0.5
-    paths = glob(file_pattern)
     arrs = []
-    for path in paths:
+    for path in glob(file_pattern):
         arrs.extend(np.load(path))
 
     dataset = load(arrs, bsz)
@@ -161,27 +130,21 @@ def build(file_pattern, bsz, validation_split=0.1):
     else:
         return dataset, None
 
-def load(arrs, bsz, drop=True):
+def load(x, bsz, drop=True):
     return tf.data.Dataset.from_tensor_slices(
-        arrs,
-    ).prefetch(
-        tf.data.experimental.AUTOTUNE
-    ).map(
-        parse_fn, num_parallel_calls=tf.data.experimental.AUTOTUNE
+        x,
     ).interleave(
-        lambda x : tf.keras.utils.timeseries_dataset_from_array(
-            x, targets=None, sequence_length=FLAGS.input_dims,
-        # ).map(
-        #     parse_fn, num_parallel_calls=tf.data.experimental.AUTOTUNE
-        ),
-        cycle_length = tf.data.experimental.AUTOTUNE,
-        num_parallel_calls = tf.data.experimental.AUTOTUNE
+        lambda x : tf.data.Dataset.from_tensors(x)
+            .map(parse_fn, num_parallel_calls=tf.data.experimental.AUTOTUNE),
+    #     cycle_length = tf.data.experimental.AUTOTUNE,
+    #     num_parallel_calls = tf.data.experimental.AUTOTUNE
     # ).repeat(
     #     count=3
     # ).shuffle(
     #     4,
     #     reshuffle_each_iteration=True
     ).cache(
+    ).unbatch(
     ).batch(
         batch_size=bsz,
         drop_remainder=drop,
