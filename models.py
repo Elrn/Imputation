@@ -5,6 +5,7 @@ from tensorflow.keras.layers import *
 import flags
 FLAGS = flags.FLAGS
 import losses
+import layers
 
 ########################################################################################################################
 class GAN(tf.keras.Model):
@@ -36,12 +37,13 @@ class GAN(tf.keras.Model):
 
     @tf.function
     def train_step(self, inputs):
+        x, time = inputs
         with tf.GradientTape() as tape:
-            fake = self.G(inputs, training=True)
-            real_logits = self.D(inputs, training=True)
+            fake = self.G(x, training=True)
+            real_logits = self.D(x, training=True)
             fake_logits = self.D(fake, training=True)
             d_cost = self.d_loss(real_logits, fake_logits)
-            gp = self.gradient_penalty(inputs, fake)
+            gp = self.gradient_penalty(x, fake)
             d_loss = d_cost + gp * self.gp_weight
         d_grad = tape.gradient(d_loss, self.D.trainable_variables)
         self.d_opt.apply_gradients(
@@ -49,10 +51,10 @@ class GAN(tf.keras.Model):
         )
 
         with tf.GradientTape() as tape:
-            fake = self.G(inputs, training=True)
+            fake = self.G(x, training=True)
             fake_logits = self.D(fake, training=True)
-            mask = tf.math.logical_not(tf.math.is_nan(inputs))
-            g_loss = self.g_loss(inputs, fake, mask, fake_logits, FLAGS.lambda_)
+            mask = tf.math.logical_not(tf.math.is_nan(x))
+            g_loss = self.g_loss(x, fake, mask, fake_logits, FLAGS.lambda_)
         g_grad = tape.gradient(g_loss, self.G.trainable_variables)
         self.g_opt.apply_gradients(
             zip(g_grad, self.G.trainable_variables)
@@ -65,19 +67,19 @@ class GAN(tf.keras.Model):
 
 ########################################################################################################################
 def build(input_shape, model):
-    input = tf.keras.layers.Input(shape=input_shape)
-    output = model(input)
-    model = tf.keras.Model(input, output, name=None)
+    data = tf.keras.layers.Input(shape=input_shape)
+    time = tf.keras.layers.Input(shape=input_shape)
+    output = model((data, time))
+    model = tf.keras.Model((data, time), output, name=None)
     return model
 
 def discriminator(units=64, drop_rate=0.2):
-    def main(x):
+    def main(inputs):
+        x, time = inputs
         # x = Embedding(input_dim=1000, output_dim=64)(x)
         x = Masking(mask_value=np.nan)(x)
-        x = tf.keras.layers.RNN(
-            tf.keras.layers.GRUICell(units),
-            return_sequences=True,
-            return_state=True
+        x = RNN(
+            layers.GRUICell(units, time=time),
         )(x)
         x = Dropout(drop_rate)(x)
         x = Dense(1)(x)
@@ -85,22 +87,23 @@ def discriminator(units=64, drop_rate=0.2):
     return main
 
 def generator(units=64, drop_rate=0.2):
-    def main(x):
+    def main(inputs):
+        x, time = inputs
         x = Masking(mask_value=np.nan)(x)
         z = z_generator()(x)
-        x = tf.keras.layers.RNN(
-            tf.keras.layers.GRUICell(units, return_sequences=True),
+        fake, x = RNN(
+            layers.GRUICell(units, time=time),
             return_sequences=True,
-            return_state=True
         )(z)
-        x = Dropout(drop_rate)(x)
-        x = Dense(FLAGS.input_dims)(x)
-        return x, z
+        return fake
     return main
 
 def z_generator():
     def main(x):
-        x = GRU(units=x.shape[0], return_sequences=True)(x)
+        x = RNN(
+            layers.GRUICell(),
+            return_sequences=True
+        )(x)
         return x
     return main
 
