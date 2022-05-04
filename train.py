@@ -16,10 +16,20 @@ def main(argv):
     ckpt_file_path = utils.join_dir([FLAGS.ckpt_dir, ckpt_file_name])
 
     ### Get Data
-    data_pattern = utils.join_dir([FLAGS.data_dir, '*_data.npy'])
-    time_pattern = utils.join_dir([FLAGS.data_dir, '*_time.npy'])
-    dataset, val_dataset = Physionet_2012.build(data_pattern, bsz=FLAGS.bsz, validation_split=0.1)
-    time, val_time = Physionet_2012.build(data_pattern, bsz=FLAGS.bsz, validation_split=0.1)
+    data_pattern = utils.join_dir([FLAGS.arr_dir, '*_data.npy'])
+    time_pattern = utils.join_dir([FLAGS.arr_dir, '*_time.npy'])
+    dataset, val_dataset = Physionet_2012.build(
+        data_pattern,
+        bsz=FLAGS.bsz,
+        validation_split=FLAGS.validation_split
+    )
+    time, val_time = Physionet_2012.build(
+        time_pattern,
+        bsz=FLAGS.bsz,
+        validation_split=FLAGS.validation_split
+    )
+
+    # val_dataset = tf.data.Dataset.zip(val_dataset, val_time)
 
     ### Build model
     input_shape = Physionet_2012.get_input_shape
@@ -56,7 +66,7 @@ def main(argv):
     history = model.fit(
         x = (dataset, time),
         epochs=FLAGS.epochs,
-        validation_data=(val_dataset, val_time),
+        # validation_data=val_dataset,
         initial_epoch=initial_epoch,
         callbacks=[
             callbacks.ModelCheckpoint(ckpt_file_path, monitor='loss', save_best_only=True, save_weights_only=False, save_freq='epoch'),
