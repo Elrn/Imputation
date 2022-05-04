@@ -29,13 +29,16 @@ flags.DEFINE_float('lambda_', 1.0, 'lambda hyperparam for generator loss functio
 flags.DEFINE_boolean('train', True, '모델 학습을 위한 모드')
 
 flags.DEFINE_integer("epochs", 10000, "")
-flags.DEFINE_integer("bsz", 128, "")
-flags.DEFINE_integer('save_frequency', 2, 'save frequency during training', lower_bound=2)
+flags.DEFINE_integer('save_frequency', 1, 'save frequency during training', lower_bound=1)
 
 ########################################################################################################################
 """ Dataset Setting """
 ########################################################################################################################
 flags.DEFINE_integer('input_dims', 41, '', lower_bound=0)
+flags.DEFINE_integer('features', 36, '', lower_bound=0)
+flags.DEFINE_float('validation_split', 0., 'validation_split', lower_bound=0., upper_bound=0.9)
+flags.DEFINE_integer("bsz", 64, "")
+
 
 ########################################################################################################################
 """ Optimizer Setting """
