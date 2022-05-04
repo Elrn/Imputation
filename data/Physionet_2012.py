@@ -85,7 +85,7 @@ FLAGS = flags.FLAGS
 
 num_columns = 36 # except header cols
 ########################################################################################################################
-get_input_shape = lambda :[FLAGS.input_dims, num_columns]
+get_input_shape = [None, num_columns]
 
 def parse_fn(x):
     start_index = 0
@@ -109,6 +109,7 @@ def parse_fn(x):
         lambda steps, inds: tf.gather(steps, inds),
         num_parallel_calls=tf.data.AUTOTUNE
     ).prefetch(tf.data.AUTOTUNE)
+
     return dataset
 
 
@@ -122,20 +123,24 @@ def build(file_pattern, bsz, validation_split=0.1):
     assert 0 <= validation_split <= 0.5
     arrs = []
     for path in glob(file_pattern):
-        arrs.extend(np.load(path))
-
+        arrs.append(np.load(path))
+    arrs = tf.ragged.constant(arrs, dtype=tf.float32)
     dataset = load(arrs, bsz)
-    if validation_split is not None and validation_split is not 0:
+
+    if validation_split != None and validation_split > 0.0:
         return validation_split_fn(dataset, validation_split)
     else:
         return dataset, None
 
 def load(x, bsz, drop=True):
-    return tf.data.Dataset.from_tensor_slices(
-        x,
-    ).interleave(
-        lambda x : tf.data.Dataset.from_tensors(x)
-            .map(parse_fn, num_parallel_calls=tf.data.experimental.AUTOTUNE),
+    return tf.data.Dataset.from_generator(
+        lambda: x,
+        # tf.float32
+        output_signature=(
+            tf.RaggedTensorSpec(shape=(None, FLAGS.features), dtype=tf.float32))
+    # ).interleave(
+    #     parse_fn,
+    #     num_parallel_calls=tf.data.experimental.AUTOTUNE
     #     cycle_length = tf.data.experimental.AUTOTUNE,
     #     num_parallel_calls = tf.data.experimental.AUTOTUNE
     # ).repeat(
@@ -143,8 +148,9 @@ def load(x, bsz, drop=True):
     # ).shuffle(
     #     4,
     #     reshuffle_each_iteration=True
-    ).cache(
-    ).unbatch(
+    # ).map(parse_fn, num_parallel_calls=tf.data.experimental.AUTOTUNE
+    # ).cache(
+    # ).unbatch(
     ).batch(
         batch_size=bsz,
         drop_remainder=drop,
