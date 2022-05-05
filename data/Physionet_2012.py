@@ -259,13 +259,18 @@ def preprocessing(file):
 def main(argv):
     pattern = utils.join_dir([FLAGS.data_dir, '*.txt'])
     paths = glob(pattern)
+    dfs, times = [], []
     for file in paths:
         df_arr, time_arr = preprocessing(file)
         filename = os.path.splitext(os.path.basename(file))[0]
-        save_path = utils.join_dir([FLAGS.arr_dir, filename])
-        # np.savez_compressed(save_path, data=df_arr, time=time_arr)
-        np.save(utils.join_dir([save_path, filename + '_data']), df_arr)
-        np.save(utils.join_dir([save_path, filename + '_time']), time_arr)
+        # save_path = utils.join_dir([FLAGS.arr_dir, filename])
+        # np.save(utils.join_dir([save_path, filename + '_data']), df_arr)
+        # np.save(utils.join_dir([save_path, filename + '_time']), time_arr)
+
+        dfs.append(df_arr)
+        times.append(time_arr)
+    save_path = utils.join_dir([FLAGS.arr_dir, 'PysioNet_2012'])
+    np.savez_compressed(save_path, data=dfs, time=times)
 
 
 if __name__ == '__main__':
