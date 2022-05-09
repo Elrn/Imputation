@@ -71,6 +71,7 @@ In-hospital death   (0: survivor, or 1: died in-hospital)
 ------------------------------------------------------------------------------------------------------------------------
 """
 import os.path
+from os.path import join
 
 import numpy as np
 import tensorflow as tf
@@ -85,33 +86,13 @@ FLAGS = flags.FLAGS
 
 num_columns = 36 # except header cols
 ########################################################################################################################
-get_input_shape = [None, num_columns]
+get_input_shape = lambda : (FLAGS.row_lengths, num_columns)
 
 def parse_fn(x):
-    start_index = 0
-    end_index = x.shape[0]
-    num_seqs = end_index - start_index - (FLAGS.input_dims) + 1
-
-    index_dtype = 'int32' if num_seqs < 2147483647 else 'int64'
-
-    start_positions = np.arange(0, num_seqs, dtype=index_dtype)
-    sequence_length = tf.cast(FLAGS.input_dims, dtype=index_dtype)
-
-    positions_ds = tf.data.Dataset.from_tensors(start_positions).repeat()
-
-    zip_ds = tf.data.Dataset.zip((tf.data.Dataset.range(len(start_positions)), positions_ds))
-    indices = zip_ds.map(
-        lambda i, positions: tf.range(positions[i], positions[i] + sequence_length),
-        num_parallel_calls=tf.data.AUTOTUNE
-    )
-    zip_ds = tf.data.Dataset.zip((tf.data.Dataset.from_tensors(x).repeat(), indices))
-    dataset = zip_ds.map(
-        lambda steps, inds: tf.gather(steps, inds),
-        num_parallel_calls=tf.data.AUTOTUNE
-    ).prefetch(tf.data.AUTOTUNE)
-
-    return dataset
-
+    data, time = x
+    data = tf.cast(data, tf.float32)
+    time = tf.cast(time, tf.float32)
+    return (data, time)
 
 def validation_split_fn(dataset, validation_split):
     len_dataset = tf.data.experimental.cardinality(dataset).numpy()
@@ -119,42 +100,47 @@ def validation_split_fn(dataset, validation_split):
     print(f'[Dataset|split] Total: "{len_dataset}", Train: "{len_dataset-valid_count}", Valid: "{valid_count}"')
     return dataset.skip(valid_count), dataset.take(valid_count)
 
-def build(file_pattern, bsz, validation_split=0.1):
+def build(file_path, bsz, validation_split=0.):
     assert 0 <= validation_split <= 0.5
-    arrs = []
-    for path in glob(file_pattern):
-        arrs.append(np.load(path))
-    arrs = tf.ragged.constant(arrs, dtype=tf.float32)
-    dataset = load(arrs, bsz)
+    with np.load(file_path) as arrs:
+        data, time = arrs['data'], arrs['time']
+    # arrs = tf.ragged.constant(arrs, dtype=tf.float32)
+    dataset = load((data, time), bsz)
 
     if validation_split != None and validation_split > 0.0:
         return validation_split_fn(dataset, validation_split)
     else:
         return dataset, None
 
+# from_generator does not support ragged tensors yet.
 def load(x, bsz, drop=True):
-    return tf.data.Dataset.from_generator(
-        lambda: x,
-        # tf.float32
-        output_signature=(
-            tf.RaggedTensorSpec(shape=(None, FLAGS.features), dtype=tf.float32))
+    return tf.data.Dataset.from_tensor_slices(
+        x,
     # ).interleave(
-    #     parse_fn,
-    #     num_parallel_calls=tf.data.experimental.AUTOTUNE
+    #     lambda x: tf.keras.preprocessing.timeseries_dataset_from_array(
+    #             x,
+    #             targets=None,
+    #             sequence_length=FLAGS.row_lengths,
+    #             sequence_stride=10,
+    #             batch_size=bsz,
+    #     ),
     #     cycle_length = tf.data.experimental.AUTOTUNE,
-    #     num_parallel_calls = tf.data.experimental.AUTOTUNE
+    #     num_parallel_calls = tf.data.experimental.AUTOTUNE,
     # ).repeat(
     #     count=3
-    # ).shuffle(
-    #     4,
-    #     reshuffle_each_iteration=True
+    ).shuffle(
+        4,
+        reshuffle_each_iteration=True
+    # map의 경우, 단일 data만 받을 수 있다.
     # ).map(parse_fn, num_parallel_calls=tf.data.experimental.AUTOTUNE
-    # ).cache(
+    ).cache(
     # ).unbatch(
     ).batch(
         batch_size=bsz,
         drop_remainder=drop,
     )
+
+
 ########################################################################################################################
 base_features = {
     'SaO2', 'K', 'NISysABP', 'Lactate', 'PaCO2', 'SysABP',
@@ -250,27 +236,39 @@ def preprocessing(file):
     df = (df - df.min()) / (df.max() - df.min())
     ### time matrix
     nan_map = pd.isnull(df).to_numpy()
-    tdf = pd.Index(df.index, name='time')#.to_frame(index=False)
+    tdf = pd.Index(df.index, name='time') #.to_frame(index=False)
     time = dutils.time_lag_matrix(nan_map, tdf)
     df = df.to_numpy()
 
     return df, time
 
-def main(argv):
-    pattern = utils.join_dir([FLAGS.data_dir, '*.txt'])
+
+def main(*argv):
+    pattern = join(FLAGS.txt_dir, '*.txt')
     paths = glob(pattern)
-    dfs, times = [], []
+    file_list, time_list = [], []
+    extract_module = dutils.time_series_crop_n_pad(
+        FLAGS.row_lengths,
+        seq_stride=FLAGS.sequence_stride
+    )
+
     for file in paths:
         df_arr, time_arr = preprocessing(file)
-        filename = os.path.splitext(os.path.basename(file))[0]
-        # save_path = utils.join_dir([FLAGS.arr_dir, filename])
-        # np.save(utils.join_dir([save_path, filename + '_data']), df_arr)
-        # np.save(utils.join_dir([save_path, filename + '_time']), time_arr)
-
-        dfs.append(df_arr)
-        times.append(time_arr)
-    save_path = utils.join_dir([FLAGS.arr_dir, 'PysioNet_2012'])
-    np.savez_compressed(save_path, data=dfs, time=times)
+        data, time = extract_module(df_arr), extract_module(time_arr)
+        # ### 개별 저장 시
+        # filename = os.path.splitext(os.path.basename(file))[0]
+        # save_path = join(FLAGS.arr_dir, filename)
+        # np.save(join(save_path, filename + '_data'), df_arr)
+        # np.save(join(save_path, filename + '_time'), time_arr)
+        if type(data) == 'NoneType':
+            continue
+        file_list.append(data)
+        time_list.append(time)
+    files = np.concatenate(file_list, 0)
+    times = np.concatenate(time_list, 0)
+    # ### 하나의 파일로 저장
+    save_path = join(FLAGS.data_dir, 'PysioNet_2012.npz')
+    np.savez_compressed(save_path, data=files, time=times)
 
 
 if __name__ == '__main__':

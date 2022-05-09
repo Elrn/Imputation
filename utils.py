@@ -21,7 +21,7 @@ def tf_init():
         except RuntimeError as e:
             print(e)
 
-def join_dir(dirs:list):
+def join(dirs:list):
     if len(dirs) == 0:
         return dirs
     base = dirs[0]

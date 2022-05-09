@@ -7,47 +7,38 @@ import models
 import losses
 import callbacks
 from data import Physionet_2012
+from os.path import join
 import flags
 FLAGS = flags.FLAGS
+from tensorflow.python.platform import tf_logging as logging
 
 def main(argv):
     ### ckpt
     ckpt_file_name = 'EP_{epoch}, L_{loss:.3f}, vP_{val_loss:.3f}.hdf5'
-    ckpt_file_path = utils.join_dir([FLAGS.ckpt_dir, ckpt_file_name])
+    ckpt_file_path = join(FLAGS.ckpt_dir, ckpt_file_name)
 
     ### Get Data
-    data_pattern = utils.join_dir([FLAGS.arr_dir, '*_data.npy'])
-    time_pattern = utils.join_dir([FLAGS.arr_dir, '*_time.npy'])
-    dataset, val_dataset = Physionet_2012.build(
-        data_pattern,
-        bsz=FLAGS.bsz,
-        validation_split=FLAGS.validation_split
-    )
-    time, val_time = Physionet_2012.build(
-        time_pattern,
-        bsz=FLAGS.bsz,
-        validation_split=FLAGS.validation_split
-    )
-
-    # val_dataset = tf.data.Dataset.zip(val_dataset, val_time)
+    file_path = join(FLAGS.data_dir, 'PhysioNet2012.npz')
+    dataset, _ = Physionet_2012.build(file_path, FLAGS.bsz, 0)
 
     ### Build model
-    input_shape = Physionet_2012.get_input_shape
-    input = tf.keras.layers.Input(shape=input_shape)
-    output = models.GAN(
-        discriminator=models.build(input_shape, models.discriminator()),
-        generator=models.build(input_shape, models.generator())
-    )(input)
-    model = tf.keras.Model(input, output, name=None)
+    # logging.info(f'Build Model ..')
+    input_shape = Physionet_2012.get_input_shape()
+    model = models.GAN(
+        discriminator=models.build(input_shape, models.discriminator(FLAGS.units)),
+        generator=models.build(input_shape, models.generator(FLAGS.units))
+    )
 
     ### Compile model
+    logging.info(f'Compile Model ..')
     metric_list = [
     ]
-    model.compile(d_opt=tf.keras.optimizers.Adam(learning_rate=0.001),
-                  g_opt=tf.keras.optimizers.Adam(learning_rate=0.001),
-                  # loss=losses.MSE(),
-                  # metrics=metric_list,
-                  )
+    model.compile(
+        d_opt=tf.keras.optimizers.Adam(learning_rate=0.00001),
+        g_opt=tf.keras.optimizers.Adam(learning_rate=0.00001),
+        # loss=losses.MSE(),
+        # metrics=metric_list,
+    )
 
     ### load weights
     filepath_to_load = callbacks.load_weights._get_most_recently_modified_file_matching_pattern(ckpt_file_path)
@@ -63,8 +54,9 @@ def main(argv):
         initial_epoch = 0
 
     ### Train model
+    logging.info(f'Model fit ..')
     history = model.fit(
-        x = (dataset, time),
+        x=dataset,
         epochs=FLAGS.epochs,
         # validation_data=val_dataset,
         initial_epoch=initial_epoch,
