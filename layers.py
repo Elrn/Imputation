@@ -110,7 +110,7 @@ from keras import activations
 ########################################################################################################################
 
 ########################################################################################################################
-class GRUI(recurrent_v2.GRU):
+class GRUI(recurrent.GRU):
     def __init__(self, units, **kwargs):
         super(GRUI, self).__init__(units, **kwargs)
 
@@ -137,13 +137,13 @@ class GRUI(recurrent_v2.GRU):
         return time_map
 
     def call(self, inputs, mask=None, training=None, initial_state=None, **kwargs):
-        self.time = kwargs.pop('time', None)
-        if self.time == None:
+        time = kwargs.pop('time', None)
+        if time == None:
             logging.warning(
                 '[!] There is no "Time map" in kwargs.'
             )
         else:
-            time_map = self.get_time_map(self.time)
+            time_map = self.get_time_map(time)
             inputs *= time_map
         return super(GRUI, self).call(
             inputs, mask=mask, training=training, initial_state=initial_state)
