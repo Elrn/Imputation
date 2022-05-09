@@ -72,7 +72,7 @@ class GAN(tf.keras.Model):
             zip(g_grad, self.G.trainable_variables)
         )
 
-        return {"d_loss": d_loss, "g_loss": g_loss, "GP": gp}
+        return {"d_loss": d_loss, "g_loss": g_loss, "GP": gp, 'real':real_logits, 'fake':fake_logits}
 
     def call(self, inputs):
         return self.G(inputs)
@@ -94,7 +94,7 @@ def discriminator(units, drop_rate=0.2):
         x, time = x
         # x = Embedding(input_dim=1000, output_dim=64)(x)
         x = Masking(mask_value=np.nan)(x)
-        x = layers.GRUI_test(
+        x = layers.GRUI(
             units
         )(x, time=time)
         x = Dropout(drop_rate)(x)
@@ -112,10 +112,10 @@ def generator(units, drop_rate=0.2):
         x, time = x
         x = Masking(mask_value=np.nan)(x)
         z = z_generator(FLAGS.input_dim)((x, time))
-        fake, x = layers.GRUI_test(
+        fake = layers.GRUI(
             units=FLAGS.input_dim,
             return_sequences=True,
-            return_state=True,
+            # return_state=True,
         )(z, time=time)
         return fake
     return main
@@ -130,11 +130,11 @@ def z_generator(units):
     """
     def main(x):
         x, time = x
-        x = layers.GRUI_test(
+        z = layers.GRUI(
             units=units,
             return_sequences=True
         )(x, time=time)
-        return x
+        return z
     return main
 
 
