@@ -39,7 +39,7 @@ flags.DEFINE_integer('input_dim', 36, '', lower_bound=0)
 flags.DEFINE_integer('sequence_stride', 10, '', lower_bound=0)
 flags.DEFINE_integer('units', 64, '', lower_bound=0)
 flags.DEFINE_float('validation_split', 0., 'validation_split', lower_bound=0., upper_bound=0.9)
-flags.DEFINE_integer("bsz", 128, "")
+flags.DEFINE_integer("bsz", 2048, "") # 256
 
 
 ########################################################################################################################

@@ -133,12 +133,13 @@ def load(x, bsz, drop=True):
         reshuffle_each_iteration=True
     # map의 경우, 단일 data만 받을 수 있다.
     # ).map(parse_fn, num_parallel_calls=tf.data.experimental.AUTOTUNE
-    ).cache(
     # ).unbatch(
     ).batch(
         batch_size=bsz,
         drop_remainder=drop,
+    ).cache(
     )
+
 
 
 ########################################################################################################################

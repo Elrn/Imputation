@@ -36,26 +36,34 @@ class GAN(tf.keras.Model):
         gp = tf.reduce_mean((norm - 1.0) ** 2)
         return gp
 
+    def regularizer(self, x, time):
+        with tf.GradientTape() as tape:
+            tape.watch(x)
+            logits = self.D((x, time), training=True)
+        grads = tape.gradient(logits, x)[0]
+        norm = tf.norm(grads, 2)
+        return 10. * norm
+
     @tf.function
     def train_step(self, inputs):
         data, time = inputs
         # time_lag = self.time_map_generator(time)
         time_lag = tf.zeros([FLAGS.bsz, FLAGS.row_lengths, FLAGS.input_dim])
-        x = (data, time_lag)
+        x = (data, time)
         with tf.GradientTape() as tape:
             fake = self.G(x, training=True)
             real_logits = self.D(x, training=True)
-            fake_logits = self.D((fake, time), training=True)
-            d_cost = self.d_loss(real_logits, fake_logits)
+            fake_logits = self.D((fake, time_lag), training=True)
+            d_loss = self.d_loss(real_logits, fake_logits)
             gp = self.gradient_penalty(data, fake, time_lag)
-            d_loss = d_cost + gp * 10.
+            d_loss = d_loss + gp * 10.
         d_grad = tape.gradient(d_loss, self.D.trainable_variables)
         self.d_opt.apply_gradients(
             zip(d_grad, self.D.trainable_variables)
         )
         with tf.GradientTape() as tape:
             fake = self.G(x, training=True)
-            fake_logits = self.D((fake, time), training=True)
+            fake_logits = self.D((fake, time_lag), training=True)
             mask = tf.math.logical_not(tf.math.is_nan(x))
             mask = tf.cast(mask, tf.float32)
             g_loss = self.g_loss(x, fake, mask, fake_logits, FLAGS.lambda_)

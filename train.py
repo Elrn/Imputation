@@ -14,7 +14,7 @@ from tensorflow.python.platform import tf_logging as logging
 
 def main(argv):
     ### ckpt
-    ckpt_file_name = 'EP_{epoch}, L_{loss:.3f}, vP_{val_loss:.3f}.hdf5'
+    ckpt_file_name = 'EP_{epoch}, L_{d_loss:.4f}, vP_{g_loss:.4f}, GP_{GP:.4f}.hdf5'
     ckpt_file_path = join(FLAGS.ckpt_dir, ckpt_file_name)
 
     ### Get Data
@@ -34,8 +34,8 @@ def main(argv):
     metric_list = [
     ]
     model.compile(
-        d_opt=tf.keras.optimizers.Adam(learning_rate=0.00001),
-        g_opt=tf.keras.optimizers.Adam(learning_rate=0.00001),
+        d_opt=tf.keras.optimizers.Adam(learning_rate=FLAGS.lr),
+        g_opt=tf.keras.optimizers.Adam(learning_rate=FLAGS.lr),
         # loss=losses.MSE(),
         # metrics=metric_list,
     )
