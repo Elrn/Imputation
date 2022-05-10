@@ -74,11 +74,8 @@ class GAN(tf.keras.Model):
 
         return {"d_loss": d_loss, "g_loss": g_loss, "GP": gp, 'real':real_logits, 'fake':fake_logits}
 
-    def call(self, inputs):
-        return self.G(inputs)
-    #
-    # def call(self, inputs, training=None):
-    #     return
+    # def call(self, inputs):
+    #     return self.G(inputs)
 
 ########################################################################################################################
 def build(input_shape, model):
